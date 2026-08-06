@@ -29,7 +29,7 @@ fn main() {
     println!("Испорченный state:  {:?}", state);
 
     // 3. Вызываем функцию восстановления (seed = 42)
-    neurons_fix(&mut state, &weight_matrix, 42);
+    neuron_fix(&mut state, &weight_matrix, 42);
     println!("Восстановленный state: {:?}", state);
 
     // 4. Проверяем, совпал ли результат с оригиналом
