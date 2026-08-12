@@ -13,7 +13,7 @@ fn main() {
     let mut file = File::create("capacity_results.csv").expect("Не удалось создать CSV файл");
     writeln!(file, "n,alpha,p,seed,overlap,success").unwrap();
 
-    println!("Запуск эксперимента 1 (Кривые ёмкости)...");
+    println!("Запуск эксперимента 1");
 
     for &n in &n_values {
         println!("Расчет для N = {}...", n);
