@@ -5,9 +5,11 @@ use rand::seq::SliceRandom;
 use std::fs::File;
 use std::io::Write;
 
-fn main() {
+fn main() {}
+
+fn capacity_experiment() {
     let n_values = vec![256, 512, 1024, 2048, 4096];
-    let num_seeds = 20; 
+    let num_seeds = 20;
     let mut main_seed = rand::thread_rng().gen_range(0..10000);
 
     let mut file = File::create("capacity_results.csv").expect("Не удалось создать CSV файл");
@@ -19,7 +21,8 @@ fn main() {
         println!("Расчет для N = {}...", n);
 
         let mut alpha = 0.10;
-        while alpha <= 0.1601 { // 0.1601 из-за погрешности float
+        while alpha <= 0.1601 {
+            // 0.1601 из-за погрешности float
             let p = (alpha * n as f64).round() as usize;
 
             for seed_idx in 0..num_seeds {
@@ -45,7 +48,7 @@ fn main() {
                 for iter in 0..100 {
                     let prev_state = noisy_state.clone();
                     neuron_fix(&mut noisy_state, &weights, seed + iter as u64 + 3000);
-                    
+
                     // Если ни один нейрон не изменился за проход — останавливаемся
                     if noisy_state == prev_state {
                         break;
@@ -151,6 +154,23 @@ fn neuron_fix(states: &mut Vec<f64>, weight_matrix: &[Vec<f64>], seed: u64) -> u
 
     changed_count
 }
+fn neuron_fix_sync(states: &mut Vec<f64>, weight_matrix: &[Vec<f64>]) {
+    let n = states.len();
+    let old_states = states.clone(); // Фиксируем состояние всех нейронов до обновления
+
+    for i in 0..n {
+        let mut h_i = 0.0;
+        for j in 0..n {
+            h_i += weight_matrix[i][j] * old_states[j];
+        }
+
+        if h_i > 0.0 {
+            states[i] = 1.0;
+        } else if h_i < 0.0 {
+            states[i] = -1.0;
+        }
+    }
+}
 
 fn calculate_energy(states: &Vec<f64>, weight_matrix: &[Vec<f64>]) -> f64 {
     let n = states.len();
@@ -164,7 +184,7 @@ fn calculate_energy(states: &Vec<f64>, weight_matrix: &[Vec<f64>]) -> f64 {
 
     return -0.5 * energy_sum;
 }
-// В Н1 
+// В Н1
 fn generate_n(seed: u64) -> usize {
     let mut rng = StdRng::seed_from_u64(seed);
     let mut n = rng.gen_range(500..=1000);
@@ -191,7 +211,8 @@ fn apply_noise(pattern: &[f64], noise_ratio: f64, seed: u64) -> Vec<f64> {
 
 #[test]
 fn test_fixed_point() {
-    let mut file = File::create("test_fixed_point_results.csv").expect("Не удалось создать CSV файл");
+    let mut file =
+        File::create("test_fixed_point_results.csv").expect("Не удалось создать CSV файл");
     writeln!(file, "n,seed,state_id").unwrap();
     for _ in 0..50 {
         let mut seed = rand::thread_rng().gen_range(0..10000);
@@ -204,7 +225,7 @@ fn test_fixed_point() {
         for (i, states) in states.iter().enumerate() {
             let mut state = states.clone();
             neuron_fix(&mut state, &weights, seed + 2000);
-            writeln!(file, "{},{},{}",n,seed,i).unwrap();
+            writeln!(file, "{},{},{}", n, seed, i).unwrap();
             assert_eq!(
                 &state, states,
                 "Паттерн {} должен оставаться неподвижной точкой. Непрошедший сид:{}",
@@ -219,8 +240,6 @@ fn test_noise_10() {
     let mut file = File::create("test_noise_10_results.csv").expect("Не удалось создать CSV файл");
     writeln!(file, "seed,state,percent");
     for _ in 0..50 {
-        
-
         let mut seed = rand::thread_rng().gen_range(0..10000);
         let n = generate_n(seed);
         let p = 10;
@@ -245,13 +264,13 @@ fn test_noise_10() {
                 .count();
 
             let accuracy = matches as f64 / n as f64;
-            writeln!(file, "{},{},{},{:.0}", seed, index, n, accuracy*100.00);
+            writeln!(file, "{},{},{},{:.0}", seed, index, n, accuracy * 100.00);
             assert!(
                 accuracy >= 0.99,
                 "Точность восстановления должна быть >= 99%, получили: {:.2}%",
                 accuracy * 100.0
             );
-            
+
             index += 1;
         }
     }
@@ -283,7 +302,8 @@ fn low_load_test() {
 
 #[test]
 fn basic_drop_test() {
-    let mut file = File::create("basic_drop_test_results.csv").expect("Не удалось создать CSV файл");
+    let mut file =
+        File::create("basic_drop_test_results.csv").expect("Не удалось создать CSV файл");
     writeln!(file, "seed,acc_100,acc_200,");
     for _ in 0..50 {
         let n = 1000;
@@ -295,8 +315,6 @@ fn basic_drop_test() {
 
             let target_pattern = &states[0];
             let mut noisy_state = apply_noise(target_pattern, 0.05, seed + 2000);
-
-
 
             // Запускаем несколько итераций восстановления
             for iter in 0..5 {
@@ -315,7 +333,7 @@ fn basic_drop_test() {
 
         let acc_100 = evaluate_recovery(100);
         let acc_200 = evaluate_recovery(200);
-        writeln!(file,"{},{},{}", seed, acc_100, acc_200);
+        writeln!(file, "{},{},{}", seed, acc_100, acc_200);
         // При P = 100 восстанавливается хорошо (>= 95%)
         assert!(
             acc_100 >= 0.99,
@@ -340,7 +358,7 @@ fn test_energy() {
         let seed: u64 = rand::thread_rng().gen_range(0..10000);
         let n = 1000;
         let p = 20;
-        writeln!(file, "{}",seed);
+        writeln!(file, "{}", seed);
         let states = generate_states(p, n, seed + 1000);
         let weights = weight_matrix_calculate(&states);
 
@@ -379,7 +397,9 @@ fn test_energy() {
                         assert!(
                             e_before >= e_after,
                             "Ошибка! Энергия выросла при изменении нейрона {}: До = {:.4}, После = {:.4}",
-                            i, e_before, e_after
+                            i,
+                            e_before,
+                            e_after
                         );
                         e_before = e_after;
                     }
@@ -391,6 +411,68 @@ fn test_energy() {
                 }
             }
         }
-        
     }
+}
+
+#[test]
+fn sync_vs_async_test() {
+    let mut found_oscillation = false;
+    let mut file = File::create("test_async_vs_sync_results.csv").expect("Не удалось создать CSV файл");
+    writeln!(file, "seed");
+    // Ищем случай, где синхронный режим зацикливается
+    for seed in 0..1000 {
+        writeln!(file, "{}", seed);
+        let n = 500;
+        let p = 60;
+
+        let states = generate_states(p, n, seed + 1000);
+        let weights = weight_matrix_calculate(&states);
+        let initial_noisy = apply_noise(&states[0], 0.2, seed + 2000);
+
+        // Проверяем СИНХРОННЫЙ режим
+        let mut sync_state = initial_noisy.clone();
+        let mut history: Vec<Vec<f64>> = vec![sync_state.clone()];
+        let mut is_oscillating = false;
+
+        for _ in 0..30 {
+            neuron_fix_sync(&mut sync_state, &weights);
+
+            let len = history.len();
+            // Cостояние совпало с шагом (t-2), но изменилось с (t-1)
+            if len >= 2 && sync_state == history[len - 2] && sync_state != history[len - 1] {
+                is_oscillating = true;
+                break;
+            }
+            history.push(sync_state.clone());
+        }
+
+        // Если нашли зацикливание в синхронном режиме — проверяем асинхронный на ТЕХ ЖЕ данных
+        if is_oscillating {
+            // --- 2. Проверяем АСИНХРОННЫЙ режим ---
+            let mut async_state = initial_noisy.clone();
+            let mut async_converged = false;
+
+            for iter in 0..50 {
+                let changed = neuron_fix(&mut async_state, &weights, seed + iter as u64 + 3000);
+                if changed == 0 {
+                    async_converged = true;
+                    break;
+                }
+            }
+
+            // Главная проверка C3: Асинхронный режим сошелся к фиксированной точке
+            assert!(
+                async_converged,
+                "Ошибка! Асинхронный режим должен был сойтись, а не зациклиться."
+            );
+            found_oscillation = true;
+            writeln!(file, "{},{}", seed, found_oscillation);
+            break;
+        }
+    }
+
+    assert!(
+        found_oscillation,
+        "Не удалось найти случай с осцилляцией за 1000 сидов"
+    );
 }
