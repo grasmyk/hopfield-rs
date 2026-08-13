@@ -304,7 +304,7 @@ fn low_load_test() {
 fn basic_drop_test() {
     let mut file =
         File::create("basic_drop_test_results.csv").expect("Не удалось создать CSV файл");
-    writeln!(file, "seed,acc_100,acc_200,");
+    writeln!(file, "seed,acc_100,acc_200");
     for _ in 0..50 {
         let n = 1000;
         // Вспомогательная функция проверки точности при заданном P
