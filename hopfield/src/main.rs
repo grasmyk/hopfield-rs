@@ -4,8 +4,146 @@ use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
 use std::fs::File;
 use std::io::Write;
+use mnist::{Mnist, MnistBuilder};
 
-fn main() {}
+fn main() {
+    mnist_experiment();
+}
+
+fn mnist_experiment() {
+    let k_values = vec![2, 5, 10, 20, 50];
+    let num_seeds = 10; // Количество запусков на каждое k
+
+    // 1. Файл с метриками точности и C_ab
+    let mut csv_file = File::create("mnist_results.csv")
+        .expect("Не удалось создать mnist_results.csv");
+    writeln!(csv_file, "dataset,k,seed,image_idx,c_ab,overlap,success").unwrap();
+
+    // 2. Файл с пикселями картинок
+    let mut samples_file = File::create("mnist_samples.csv")
+        .expect("Не удалось создать mnist_samples.csv");
+    writeln!(samples_file, "k,image_idx,stage,pixels").unwrap();
+
+    for &k in &k_values {
+        for seed_idx in 0..num_seeds {
+            let seed = rand::thread_rng().gen_range(0..10000) + seed_idx + k * 100;
+
+            // --- 1. MNIST ---
+            let mnist_patterns = load_mnist_binarized(k);
+            let weights_mnist = weight_matrix_calculate(&mnist_patterns);
+            let c_ab_mnist = calculate_pairwise_overlap(&mnist_patterns);
+
+            for (img_idx, pattern) in mnist_patterns.iter().enumerate() {
+                // Ломаем нижнюю половину и сохраняем копию зашумленного состояния
+                let mut state = corrupt_lower_half(pattern, seed as u64 + img_idx as u64);
+                let corrupted_copy = state.clone();
+
+                // Запуск восстановления
+                for iter in 0..100 {
+                    let changed = neuron_fix(&mut state, &weights_mnist, seed as u64 + iter as u64 + 500);
+                    if changed == 0 {
+                        break;
+                    }
+                }
+
+                // Сравниваем результат с оригиналом
+                let m = calculate_overlap(&state, pattern);
+                let success = if m >= 0.95 { 1 } else { 0 };
+
+                writeln!(
+                    csv_file,
+                    "mnist,{},{},{},{:.4},{:.4},{}",
+                    k, seed, img_idx, c_ab_mnist, m, success
+                ).unwrap();
+
+                // Для k = 5 на первом сиде сохраняем все 3 состояния для визуализации
+                if k == 5 && seed_idx == 0 {
+                    let orig_str: Vec<String> = pattern.iter().map(|p| p.to_string()).collect();
+                    let corr_str: Vec<String> = corrupted_copy.iter().map(|p| p.to_string()).collect();
+                    let rest_str: Vec<String> = state.iter().map(|p| p.to_string()).collect();
+
+                    writeln!(samples_file, "{},{},original,\"{}\"", k, img_idx, orig_str.join(" ")).unwrap();
+                    writeln!(samples_file, "{},{},corrupted,\"{}\"", k, img_idx, corr_str.join(" ")).unwrap();
+                    writeln!(samples_file, "{},{},restored,\"{}\"", k, img_idx, rest_str.join(" ")).unwrap();
+                }
+            }
+
+            // --- 2. RANDOM CONTROL ---
+            let random_patterns = generate_states(k, 784, seed as u64);
+            let weights_random = weight_matrix_calculate(&random_patterns);
+            let c_ab_random = calculate_pairwise_overlap(&random_patterns);
+
+            for (img_idx, pattern) in random_patterns.iter().enumerate() {
+                let mut state = corrupt_lower_half(pattern, seed as u64 + img_idx as u64);
+
+                for iter in 0..100 {
+                    let changed = neuron_fix(&mut state, &weights_random, seed as u64 + iter as u64 + 500);
+                    if changed == 0 {
+                        break;
+                    }
+                }
+
+                let m = calculate_overlap(&state, pattern);
+                let success = if m >= 0.95 { 1 } else { 0 };
+
+                writeln!(
+                    csv_file,
+                    "random,{},{},{},{:.4},{:.4},{}",
+                    k, seed, img_idx, c_ab_random, m, success
+                ).unwrap();
+            }
+        }
+    }
+
+    // Гарантированно выталкиваем данные из оперативной памяти на диск
+    csv_file.flush().unwrap();
+    samples_file.flush().unwrap();
+
+    println!("Эксперимент успешно завершен!");
+    println!("Созданы файлы: 'mnist_results.csv' и 'mnist_samples.csv'.");
+}
+
+fn calculate_pairwise_overlap(patterns: &[Vec<f64>]) -> f64 {
+    let k = patterns.len();
+    if k <= 1 {
+        return 1.0;
+    }
+
+    let n = patterns[0].len() as f64;
+    let mut total_overlap = 0.0;
+    let mut pair_count = 0;
+
+    for i in 0..k {
+        for j in (i + 1)..k {
+            let dot_product: f64 = patterns[i].iter().zip(patterns[j].iter()).map(|(a, b)| a * b).sum();
+            total_overlap += dot_product / n;
+            pair_count += 1;
+        }
+    }
+
+    total_overlap / (pair_count as f64)
+}
+pub fn calculate_overlap(state: &[f64], pattern: &[f64]) -> f64 {
+    let n = state.len() as f64;
+    let dot_product: f64 = state.iter().zip(pattern.iter()).map(|(a, b)| a * b).sum();
+    
+    dot_product / n
+}
+
+fn corrupt_lower_half(pattern: &[f64], seed: u64) -> Vec<f64> {
+    let mut corrupted = pattern.to_vec();
+    let n = corrupted.len();
+    let half = n / 2; // Для N = 784 это 392
+
+    let mut rng = StdRng::seed_from_u64(seed);
+
+    // Стираем и зашумляем нижнюю половину (индексы 392..784)
+    for i in half..n {
+        corrupted[i] = if rng.gen_bool(0.5) { 1.0 } else { -1.0 };
+    }
+
+    corrupted
+}
 
 fn capacity_experiment() {
     let n_values = vec![256, 512, 1024, 2048, 4096];
@@ -207,6 +345,29 @@ fn apply_noise(pattern: &[f64], noise_ratio: f64, seed: u64) -> Vec<f64> {
     }
 
     noisy_state
+}
+
+fn load_mnist_binarized(count: usize) -> Vec<Vec<f64>> {
+    let Mnist { trn_img, .. } = MnistBuilder::new()
+        .label_format_digit()
+        .training_set_length(count as u32)
+        .validation_set_length(0)
+        .test_set_length(0)
+        .finalize();
+
+    let mut images = Vec::with_capacity(count);
+
+    // Каждая картинка занимает 28x28 = 784 байт
+    for chunk in trn_img.chunks(784) {
+        let binarized: Vec<f64> = chunk
+            .iter()
+            .map(|&pixel| if pixel > 127 { 1.0 } else { -1.0 })
+            .collect();
+
+        images.push(binarized);
+    }
+
+    images
 }
 
 #[test]
