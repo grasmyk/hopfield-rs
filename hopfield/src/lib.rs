@@ -2,17 +2,19 @@ use rand::Rng;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
-use std::fs::File;
-use std::io::Write;
 use mnist::{Mnist, MnistBuilder};
 
 #[test]
+
 pub fn mnist_experiment() {
+    use std::fs::File;
+    use std::io::Write;
+    
     let k_values = vec![2, 5, 10, 20, 50];
     let num_seeds = 10; // Количество запусков на каждое k
 
     // 1. Файл с метриками точности и C_ab
-    let mut csv_file = File::create("mnist_results.csv")
+    let mut csv_file:File = File::create("mnist_results.csv")
         .expect("Не удалось создать mnist_results.csv");
     writeln!(csv_file, "dataset,k,seed,image_idx,c_ab,overlap,success").unwrap();
 
@@ -123,7 +125,7 @@ pub fn calculate_pairwise_overlap(patterns: &[Vec<f64>]) -> f64 {
 
 /// Упаковка вектора f64 (+1.0 / -1.0) в битовый массив u64
 pub fn pack_bits(vec: &[f64]) -> Vec<u64> {
-    let mut packed = vec![0u64; (vec.len() + 63) / 64];
+    let mut packed = vec![0u64; vec.len().div_ceil(64)];
     for (i, &val) in vec.iter().enumerate() {
         if val < 0.0 {
             packed[i / 64] |= 1u64 << (i % 64);
@@ -240,6 +242,9 @@ pub fn corrupt_lower_half(pattern: &[f64], seed: u64) -> Vec<f64> {
 // Эксперимент емкости
 #[test]
 pub fn capacity_experiment() {
+    use std::fs::File;
+    use std::io::Write;
+    
     let n_values = vec![256, 512, 1024, 2048, 4096];
     let num_seeds = 20;
     let mut main_seed = rand::thread_rng().gen_range(0..10000);
@@ -327,7 +332,7 @@ pub fn generate_states(p: usize, n: usize, seed: u64) -> Vec<Vec<f64>> {
         states_vector.push(states);
     }
 
-    return states_vector;
+    states_vector
 }
 
 // Создает матрицу весов
@@ -346,19 +351,19 @@ pub fn weight_matrix_calculate(states: &[Vec<f64>]) -> Vec<Vec<f64>> {
                 weight_matrix[i][j] = 0.0;
             } else {
                 let mut sum = 0.0;
-                for states in states {
-                    sum += states[i] * states[j];
+                for state in states {
+                    sum += state[i] * state[j];
                 }
                 weight_matrix[i][j] = sum / (n as f64);
             }
         }
     }
 
-    return weight_matrix;
+    weight_matrix
 }
 
 // Восстанавливает искаженный образ(1 проход)
-pub fn neuron_fix(states: &mut Vec<f64>, weight_matrix: &[Vec<f64>], seed: u64) -> usize {
+pub fn neuron_fix(states: &mut [f64], weight_matrix: &[Vec<f64>], seed: u64) -> usize {
     let n = states.len();
     let mut indices: Vec<usize> = (0..n).collect();
 
@@ -391,9 +396,9 @@ pub fn neuron_fix(states: &mut Vec<f64>, weight_matrix: &[Vec<f64>], seed: u64) 
 }
 
 // Восстанавливает образ (синхронно) (Нужен был только для 1го эксперимента)
-pub fn neuron_fix_sync(states: &mut Vec<f64>, weight_matrix: &[Vec<f64>]) {
+pub fn neuron_fix_sync(states: &mut [f64], weight_matrix: &[Vec<f64>]) {
     let n = states.len();
-    let old_states = states.clone(); // Фиксируем состояние всех нейронов до обновления
+    let old_states = states.to_owned(); // Фиксируем состояние всех нейронов до обновления
 
     for i in 0..n {
         let mut h_i = 0.0;
@@ -410,7 +415,7 @@ pub fn neuron_fix_sync(states: &mut Vec<f64>, weight_matrix: &[Vec<f64>]) {
 }
 
 // Расчитывает енергию
-pub fn calculate_energy(states: &Vec<f64>, weight_matrix: &[Vec<f64>]) -> f64 {
+pub fn calculate_energy(states: &[f64], weight_matrix: &[Vec<f64>]) -> f64 {
     let n = states.len();
     let mut energy_sum = 0.0;
 
@@ -420,14 +425,13 @@ pub fn calculate_energy(states: &Vec<f64>, weight_matrix: &[Vec<f64>]) -> f64 {
         }
     }
 
-    return -0.5 * energy_sum;
+    -0.5 * energy_sum
 }
 
 // Функция генерирующая случайный N
 pub fn generate_n(seed: u64) -> usize {
     let mut rng = StdRng::seed_from_u64(seed);
-    let mut n = rng.gen_range(500..=1000);
-    n
+    rng.gen_range(500..=1000)
 }
 
 // Случайно искажаем образ
@@ -475,6 +479,9 @@ pub fn load_mnist_binarized(count: usize) -> Vec<Vec<f64>> {
 
 #[test]
 pub fn test_fixed_point() {
+    use std::fs::File;
+    use std::io::Write;
+    
     let mut file =
         File::create("test_fixed_point_results.csv").expect("Не удалось создать CSV файл");
     writeln!(file, "n,seed,state_id").unwrap();
@@ -501,6 +508,9 @@ pub fn test_fixed_point() {
 
 #[test]
 pub fn test_noise_10() {
+    use std::fs::File;
+    use std::io::Write;
+
     let mut file = File::create("test_noise_10_results.csv").expect("Не удалось создать CSV файл");
     writeln!(file, "seed,state,percent");
     for _ in 0..50 {
@@ -542,6 +552,9 @@ pub fn test_noise_10() {
 
 #[test]
 pub fn low_load_test() {
+    use std::fs::File;
+    use std::io::Write;
+
     let mut file = File::create("low_load_test_results.csv").expect("Не удалось создать CSV файл");
     writeln!(file, "seed");
     for _ in 0..50 {
@@ -566,6 +579,9 @@ pub fn low_load_test() {
 
 #[test]
 pub fn basic_drop_test() {
+    use std::fs::File;
+    use std::io::Write;
+
     let mut file = File::create("basic_drop_test_results.csv").expect("Не удалось создать CSV файл");
     writeln!(file, "seed,acc_100,acc_200").unwrap();
 
@@ -624,6 +640,9 @@ pub fn basic_drop_test() {
 
 #[test]
 pub fn test_energy() {
+    use std::fs::File;
+    use std::io::Write;
+
     let mut file = File::create("test_energy_results.csv").expect("Не удалось создать CSV файл");
     writeln!(file, "seed");
     for _ in 0..50 {
@@ -688,6 +707,9 @@ pub fn test_energy() {
 
 #[test]
 pub fn sync_vs_async_test() {
+    use std::fs::File;
+    use std::io::Write;
+
     let mut found_oscillation = false;
     let mut file = File::create("test_async_vs_sync_results.csv").expect("Не удалось создать CSV файл");
     writeln!(file, "seed");
@@ -751,6 +773,9 @@ pub fn sync_vs_async_test() {
 
 #[test]
 pub fn test_bit_vs_standart_equivalence() {
+    use std::fs::File;
+    use std::io::Write;
+    
     let n = 1024;
     let p = 50;
     let num_runs = 20;
