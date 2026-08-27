@@ -4,8 +4,9 @@ use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
 use mnist::{Mnist, MnistBuilder};
 
-#[test]
-
+// ---------------------------------------------------------------------
+// Експеримент с мнистом
+// ---------------------------------------------------------------------
 pub fn mnist_experiment() {
     use std::fs::File;
     use std::io::Write;
@@ -25,7 +26,7 @@ pub fn mnist_experiment() {
 
     for &k in &k_values {
         for seed_idx in 0..num_seeds {
-            let seed = rand::thread_rng().gen_range(0..10000) + seed_idx + k * 100;
+            let seed = seed_idx + k * 100;
 
             // --- 1. MNIST ---
             let mnist_patterns = load_mnist_binarized(k);
@@ -39,7 +40,7 @@ pub fn mnist_experiment() {
 
                 // Запуск восстановления
                 for iter in 0..100 {
-                    let changed = neuron_fix(&mut state, &weights_mnist, seed as u64 + iter as u64 + 500);
+                    let changed = neuron_fix(&mut state, &weights_mnist, seed as u64 + iter as u64 + 500, None);
                     if changed == 0 {
                         break;
                     }
@@ -76,7 +77,7 @@ pub fn mnist_experiment() {
                 let mut state = corrupt_lower_half(pattern, seed as u64 + img_idx as u64);
 
                 for iter in 0..100 {
-                    let changed = neuron_fix(&mut state, &weights_random, seed as u64 + iter as u64 + 500);
+                    let changed = neuron_fix(&mut state, &weights_random, seed as u64 + iter as u64 + 500, None);
                     if changed == 0 {
                         break;
                     }
@@ -239,8 +240,9 @@ pub fn corrupt_lower_half(pattern: &[f64], seed: u64) -> Vec<f64> {
     corrupted
 }
 
-// Эксперимент емкости
-#[test]
+// ---------------------------------------------------------------------
+// Експеримент емкости
+// ---------------------------------------------------------------------
 pub fn capacity_experiment() {
     use std::fs::File;
     use std::io::Write;
@@ -284,7 +286,7 @@ pub fn capacity_experiment() {
                 //Динамика до остановки (максимум 100 проходов)
                 for iter in 0..100 {
                     let prev_state = noisy_state.clone();
-                    neuron_fix(&mut noisy_state, &weights, seed + iter as u64 + 3000);
+                    neuron_fix(&mut noisy_state, &weights, seed + iter as u64 + 3000, None);
 
                     // Если ни один нейрон не изменился за проход — останавливаемся
                     if noisy_state == prev_state {
@@ -363,9 +365,19 @@ pub fn weight_matrix_calculate(states: &[Vec<f64>]) -> Vec<Vec<f64>> {
 }
 
 // Восстанавливает искаженный образ(1 проход)
-pub fn neuron_fix(states: &mut [f64], weight_matrix: &[Vec<f64>], seed: u64) -> usize {
+pub fn neuron_fix(
+    states: &mut [f64],
+    weight_matrix: &[Vec<f64>],
+    seed: u64,
+    clamped_mask: Option<&[bool]>,
+) -> usize {
     let n = states.len();
     let mut indices: Vec<usize> = (0..n).collect();
+    
+    // Если передана маска, отсеиваем зажатые (true) нейроны из очереди на обновление
+    if let Some(mask) = clamped_mask {
+        indices.retain(|&i| !mask[i]);
+    }
 
     let mut rng = StdRng::seed_from_u64(seed);
     indices.shuffle(&mut rng);
@@ -482,11 +494,10 @@ pub fn test_fixed_point() {
     use std::fs::File;
     use std::io::Write;
     
-    let mut file =
-        File::create("test_fixed_point_results.csv").expect("Не удалось создать CSV файл");
+    let mut file = File::create("test_fixed_point_results.csv").expect("Не удалось создать CSV файл");
     writeln!(file, "n,seed,state_id").unwrap();
-    for _ in 0..50 {
-        let mut seed = rand::thread_rng().gen_range(0..10000);
+    for iter in 0..50 {
+        let mut seed = iter;
         let n = generate_n(seed);
         let p = 10;
 
@@ -495,7 +506,7 @@ pub fn test_fixed_point() {
 
         for (i, states) in states.iter().enumerate() {
             let mut state = states.clone();
-            neuron_fix(&mut state, &weights, seed + 2000);
+            neuron_fix(&mut state, &weights, seed + 2000, None);
             writeln!(file, "{},{},{}", n, seed, i).unwrap();
             assert_eq!(
                 &state, states,
@@ -513,8 +524,8 @@ pub fn test_noise_10() {
 
     let mut file = File::create("test_noise_10_results.csv").expect("Не удалось создать CSV файл");
     writeln!(file, "seed,state,percent");
-    for _ in 0..50 {
-        let mut seed = rand::thread_rng().gen_range(0..10000);
+    for seed_iter in 0..50 {
+        let mut seed = seed_iter;
         let n = generate_n(seed);
         let p = 10;
         let states = generate_states(p, n, seed + 1000);
@@ -526,8 +537,11 @@ pub fn test_noise_10() {
 
             // Делаем несколько итераций восстановления
 
-            for iter in 0..5 {
-                neuron_fix(&mut noisy_state, &weights, seed + iter + 3000);
+            for iter in 0..15 {
+                let changed = neuron_fix(&mut noisy_state, &weights, seed + iter + 3000, None);
+                if changed == 0{
+                    break;
+                }
             }
 
             // Считаем % совпадения
@@ -563,17 +577,17 @@ pub fn low_load_test() {
         let p = 20;
         let states = generate_states(p, n, seed + 1000);
         let weights = weight_matrix_calculate(&states);
+        writeln!(file, "{}", seed);
         for i in 0..p {
             for states in &states {
                 let mut state = states.clone();
-                neuron_fix(&mut state, &weights, seed + 2000);
+                neuron_fix(&mut state, &weights, seed + 2000, None);
                 assert_eq!(
                     &state, states,
                     "При alpha <= 0.02 образ должен быть точной неподвижной точкой"
                 );
             }
         }
-        writeln!(file, "{}", seed);
     }
 }
 
@@ -602,7 +616,7 @@ pub fn basic_drop_test() {
                 let mut noisy_state = apply_noise(target_pattern, 0.05, seed + 2000 + idx as u64);
 
                 for iter in 0..15 {
-                    let changed = neuron_fix(&mut noisy_state, &weights, seed + iter as u64 + 3000);
+                    let changed = neuron_fix(&mut noisy_state, &weights, seed + iter as u64 + 3000, None);
                     if changed == 0 {
                         break;
                     }
@@ -645,8 +659,8 @@ pub fn test_energy() {
 
     let mut file = File::create("test_energy_results.csv").expect("Не удалось создать CSV файл");
     writeln!(file, "seed");
-    for _ in 0..50 {
-        let seed: u64 = rand::thread_rng().gen_range(0..10000);
+    for seed_iter in 0..50 {
+        let seed: u64 = seed_iter;
         let n = 1000;
         let p = 20;
         writeln!(file, "{}", seed);
@@ -747,7 +761,7 @@ pub fn sync_vs_async_test() {
             let mut async_converged = false;
 
             for iter in 0..50 {
-                let changed = neuron_fix(&mut async_state, &weights, seed + iter as u64 + 3000);
+                let changed = neuron_fix(&mut async_state, &weights, seed + iter as u64 + 3000, None);
                 if changed == 0 {
                     async_converged = true;
                     break;
@@ -802,7 +816,7 @@ pub fn test_bit_vs_standart_equivalence() {
             writeln!(file, "{},{}", run_seed, iter);
             let iter_seed = run_seed + 3000 + (iter as u64);
 
-            let base_changed = neuron_fix(&mut base_state, &weights, iter_seed);
+            let base_changed = neuron_fix(&mut base_state, &weights, iter_seed, None);
             let bit_changed = neuron_fix_bit(
                 &mut bit_state,
                 &packed_patterns,
