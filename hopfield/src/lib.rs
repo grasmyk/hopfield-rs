@@ -7,6 +7,7 @@ use mnist::{Mnist, MnistBuilder};
 // ---------------------------------------------------------------------
 // Експеримент с мнистом
 // ---------------------------------------------------------------------
+
 pub fn mnist_experiment() {
     use std::fs::File;
     use std::io::Write;
@@ -15,7 +16,7 @@ pub fn mnist_experiment() {
     let num_seeds = 10; // Количество запусков на каждое k
 
     // 1. Файл с метриками точности и C_ab
-    let mut csv_file:File = File::create("mnist_results.csv")
+    let mut csv_file: File = File::create("mnist_results.csv")
         .expect("Не удалось создать mnist_results.csv");
     writeln!(csv_file, "dataset,k,seed,image_idx,c_ab,overlap,success").unwrap();
 
@@ -23,6 +24,13 @@ pub fn mnist_experiment() {
     let mut samples_file = File::create("mnist_samples.csv")
         .expect("Не удалось создать mnist_samples.csv");
     writeln!(samples_file, "k,image_idx,stage,pixels").unwrap();
+
+    // 3. Создаем маску clamping: верхняя половина заморожена (true), нижняя свободна (false)
+    let n = 784; // 28x28 пикселей
+    let mut mask = vec![false; n];
+    for i in 0..n / 2 {
+        mask[i] = true; // Зажимаем верхние 392 нейрона
+    }
 
     for &k in &k_values {
         for seed_idx in 0..num_seeds {
@@ -34,13 +42,18 @@ pub fn mnist_experiment() {
             let c_ab_mnist = calculate_pairwise_overlap(&mnist_patterns);
 
             for (img_idx, pattern) in mnist_patterns.iter().enumerate() {
-                // Ломаем нижнюю половину и сохраняем копию зашумленного состояния
+                // Ломаем только нижнюю половину
                 let mut state = corrupt_lower_half(pattern, seed as u64 + img_idx as u64);
                 let corrupted_copy = state.clone();
 
-                // Запуск восстановления
+                // Запуск восстановления с CLAMPING
                 for iter in 0..100 {
-                    let changed = neuron_fix(&mut state, &weights_mnist, seed as u64 + iter as u64 + 500, None);
+                    let changed = neuron_fix(
+                        &mut state, 
+                        &weights_mnist, 
+                        seed as u64 + iter as u64 + 500, 
+                        Some(&mask) // <-- Фиксируем верхнюю половину
+                    );
                     if changed == 0 {
                         break;
                     }
@@ -68,7 +81,7 @@ pub fn mnist_experiment() {
                 }
             }
 
-            // --- 2. RANDOM CONTROL ---
+            // --- 2. RANDOM CONTROL (по тому же протоколу clamping!) ---
             let random_patterns = generate_states(k, 784, seed as u64);
             let weights_random = weight_matrix_calculate(&random_patterns);
             let c_ab_random = calculate_pairwise_overlap(&random_patterns);
@@ -77,7 +90,12 @@ pub fn mnist_experiment() {
                 let mut state = corrupt_lower_half(pattern, seed as u64 + img_idx as u64);
 
                 for iter in 0..100 {
-                    let changed = neuron_fix(&mut state, &weights_random, seed as u64 + iter as u64 + 500, None);
+                    let changed = neuron_fix(
+                        &mut state, 
+                        &weights_random, 
+                        seed as u64 + iter as u64 + 500, 
+                        Some(&mask) // <-- Также применяем clamping
+                    );
                     if changed == 0 {
                         break;
                     }
@@ -146,70 +164,88 @@ pub fn unpack_bits(packed: &[u64], n: usize) -> Vec<f64> {
 }
 
 /// Расчет начального массива перекрытий m_mu через XOR и popcount
-pub fn calculate_initial_overlaps(state: &[u64], patterns: &[Vec<u64>], n: usize) -> Vec<f64> {
-    let n_f64 = n as f64;
+pub fn calculate_initial_overlaps(state: &[u64], patterns: &[Vec<u64>], n: usize) -> Vec<i32> {
+    let n_i32 = n as i32;
     patterns
         .iter()
         .map(|pat| {
             let mut popcnt = 0u32;
             for (w1, w2) in state.iter().zip(pat.iter()) {
-                popcnt += (w1 ^ w2).count_ones(); // Аппаратная инструкция popcount
+                popcnt += (w1 ^ w2).count_ones();
             }
-            (n_f64 - 2.0 * (popcnt as f64)) / n_f64
+            // Формула: q_mu = N - 2 * popcount
+            // Никаких f64 и делений! Абсолютная точность.
+            n_i32 - 2 * (popcnt as i32)
         })
         .collect()
 }
 
 // Восстановления образа без матрицы весов
-pub fn neuron_fix_bit(state: &mut [u64], patterns: &[Vec<u64>], m_overlaps: &mut [f64], n: usize, seed: u64,) -> usize {
+pub fn neuron_fix_bit(
+    state: &mut [u64],
+    patterns: &[Vec<u64>],
+    q_overlaps: &mut [i32], // Перевод с f64 на i32
+    n: usize,
+    seed: u64,
+    clamped_mask: Option<&[bool]>,
+) -> usize {
     let mut indices: Vec<usize> = (0..n).collect();
+
+    if let Some(mask) = clamped_mask {
+        indices.retain(|&i| !mask[i]);
+    }
+
     let mut rng = StdRng::seed_from_u64(seed);
     indices.shuffle(&mut rng);
 
-    let p = patterns.len();
-    let p_over_n = (p as f64) / (n as f64);
-    let inv_n = 1.0 / (n as f64);
-
+    let p = patterns.len() as i32;
     let mut changed_count = 0;
 
     for &i in &indices {
         let word_idx = i / 64;
         let bit_mask = 1u64 << (i % 64);
 
-        // Бит 1 = -1.0, Бит 0 = +1.0
+        // Бит 1 => s_i = -1, Бит 0 => s_i = +1
         let s_i_is_minus = (state[word_idx] & bit_mask) != 0;
-        let s_i = if s_i_is_minus { -1.0 } else { 1.0 };
+        let s_i: i32 = if s_i_is_minus { -1 } else { 1 };
 
-        // h_i = sum_mu(xi_i^mu * m_mu) - (P / N) * s_i
-        let mut h_i = 0.0;
+        // H_i = N * h_i = sum_mu(xi_i^mu * q_mu) - P * s_i
+        let mut h_i_scaled: i32 = 0;
         for (mu, pat) in patterns.iter().enumerate() {
             let xi_is_minus = (pat[word_idx] & bit_mask) != 0;
-            let xi_i = if xi_is_minus { -1.0 } else { 1.0 };
-            h_i += xi_i * m_overlaps[mu];
-        }
-        h_i -= p_over_n * s_i;
+            let xi_i: i32 = if xi_is_minus { -1 } else { 1 };
 
-        // Явная фиксация tie-breaker (если h_i == 0.0, состояние не меняется)
-        let new_s_i = if h_i > 0.0 {
-            1.0
-        } else if h_i < 0.0 {
-            -1.0
+            h_i_scaled += xi_i * q_overlaps[mu];
+        }
+        h_i_scaled -= p * s_i;
+
+        let new_s_i = if h_i_scaled > 0 {
+            1
+        } else if h_i_scaled < 0 {
+            -1
         } else {
             s_i
         };
 
+        // Если нейрон изменил состояние
         if new_s_i != s_i {
-            // Инвертируем бит в состоянии
-            state[word_idx] ^= bit_mask;
-            changed_count += 1;
+            let delta = new_s_i - s_i; // Ровно +2 или -2
 
-            // Инкрементальное обновление перекрытий: delta_m = 2 * xi_i^mu * new_s_i / N
-            let delta_factor = 2.0 * new_s_i * inv_n;
+            // Обновляем бит в векторе состояния
+            if new_s_i == -1 {
+                state[word_idx] |= bit_mask;
+            } else {
+                state[word_idx] &= !bit_mask;
+            }
+
+            // Быстрое инкрементальное обновление q_mu без пересчета всего массива
             for (mu, pat) in patterns.iter().enumerate() {
                 let xi_is_minus = (pat[word_idx] & bit_mask) != 0;
-                let xi_i = if xi_is_minus { -1.0 } else { 1.0 };
-                m_overlaps[mu] += xi_i * delta_factor;
+                let xi_i: i32 = if xi_is_minus { -1 } else { 1 };
+                q_overlaps[mu] += xi_i * delta;
             }
+
+            changed_count += 1;
         }
     }
 
@@ -243,13 +279,14 @@ pub fn corrupt_lower_half(pattern: &[f64], seed: u64) -> Vec<f64> {
 // ---------------------------------------------------------------------
 // Експеримент емкости
 // ---------------------------------------------------------------------
+
 pub fn capacity_experiment() {
     use std::fs::File;
     use std::io::Write;
     
     let n_values = vec![256, 512, 1024, 2048, 4096];
     let num_seeds = 20;
-    let mut main_seed = rand::thread_rng().gen_range(0..10000);
+    let main_seed = rand::thread_rng().gen_range(0..10000);
 
     let mut file = File::create("capacity_results.csv").expect("Не удалось создать CSV файл");
     writeln!(file, "n,alpha,p,seed,overlap,success").unwrap();
@@ -497,7 +534,7 @@ pub fn test_fixed_point() {
     let mut file = File::create("test_fixed_point_results.csv").expect("Не удалось создать CSV файл");
     writeln!(file, "n,seed,state_id").unwrap();
     for iter in 0..50 {
-        let mut seed = iter;
+        let seed = iter;
         let n = generate_n(seed);
         let p = 10;
 
@@ -523,9 +560,9 @@ pub fn test_noise_10() {
     use std::io::Write;
 
     let mut file = File::create("test_noise_10_results.csv").expect("Не удалось создать CSV файл");
-    writeln!(file, "seed,state,percent");
+    let _ = writeln!(file, "seed,state,percent");
     for seed_iter in 0..50 {
-        let mut seed = seed_iter;
+        let seed = seed_iter;
         let n = generate_n(seed);
         let p = 10;
         let states = generate_states(p, n, seed + 1000);
@@ -552,7 +589,7 @@ pub fn test_noise_10() {
                 .count();
 
             let accuracy = matches as f64 / n as f64;
-            writeln!(file, "{},{},{},{:.0}", seed, index, n, accuracy * 100.00);
+            let _ = writeln!(file, "{},{},{},{:.0}", seed, index, n, accuracy * 100.00);
             assert!(
                 accuracy >= 0.99,
                 "Точность восстановления должна быть >= 99%, получили: {:.2}%",
@@ -570,15 +607,15 @@ pub fn low_load_test() {
     use std::io::Write;
 
     let mut file = File::create("low_load_test_results.csv").expect("Не удалось создать CSV файл");
-    writeln!(file, "seed");
-    for _ in 0..50 {
-        let mut seed = rand::thread_rng().gen_range(0..10000);
+    let _ = writeln!(file, "seed");
+    for iter in 0..50 {
+        let seed = iter;
         let n = 1000;
         let p = 20;
         let states = generate_states(p, n, seed + 1000);
         let weights = weight_matrix_calculate(&states);
-        writeln!(file, "{}", seed);
-        for i in 0..p {
+        let _ = writeln!(file, "{}", seed);
+        for _ in 0..p {
             for states in &states {
                 let mut state = states.clone();
                 neuron_fix(&mut state, &weights, seed + 2000, None);
@@ -658,12 +695,12 @@ pub fn test_energy() {
     use std::io::Write;
 
     let mut file = File::create("test_energy_results.csv").expect("Не удалось создать CSV файл");
-    writeln!(file, "seed");
+    let _ = writeln!(file, "seed");
     for seed_iter in 0..50 {
         let seed: u64 = seed_iter;
         let n = 1000;
         let p = 20;
-        writeln!(file, "{}", seed);
+        let _ = writeln!(file, "{}", seed);
         let states = generate_states(p, n, seed + 1000);
         let weights = weight_matrix_calculate(&states);
 
@@ -726,10 +763,10 @@ pub fn sync_vs_async_test() {
 
     let mut found_oscillation = false;
     let mut file = File::create("test_async_vs_sync_results.csv").expect("Не удалось создать CSV файл");
-    writeln!(file, "seed");
+    let _ = writeln!(file, "seed");
     // Ищем случай, где синхронный режим зацикливается
     for seed in 0..1000 {
-        writeln!(file, "{}", seed);
+        let _ = writeln!(file, "{}", seed);
         let n = 500;
         let p = 60;
 
@@ -774,7 +811,7 @@ pub fn sync_vs_async_test() {
                 "Ошибка! Асинхронный режим должен был сойтись, а не зациклиться."
             );
             found_oscillation = true;
-            writeln!(file, "{},{}", seed, found_oscillation);
+            let _ = writeln!(file, "{},{}", seed, found_oscillation);
             break;
         }
     }
@@ -794,7 +831,7 @@ pub fn test_bit_vs_standart_equivalence() {
     let p = 50;
     let num_runs = 20;
     let mut file = File::create("test_bit_vs_standart_equivalence.csv").expect("Не удалось создать CSV файл");
-    writeln!(file, "seed,iter_number");
+    let _ = writeln!(file, "seed,iter_number");
     for run in 0..num_runs {
         let run_seed =  run as u64;
 
@@ -813,7 +850,7 @@ pub fn test_bit_vs_standart_equivalence() {
 
         // 2. Шаг за шагом сравниваем траектории обоих движков
         for iter in 0..20 {
-            writeln!(file, "{},{}", run_seed, iter);
+            let _ = writeln!(file, "{},{}", run_seed, iter);
             let iter_seed = run_seed + 3000 + (iter as u64);
 
             let base_changed = neuron_fix(&mut base_state, &weights, iter_seed, None);
@@ -823,6 +860,7 @@ pub fn test_bit_vs_standart_equivalence() {
                 &mut m_overlaps,
                 n,
                 iter_seed,
+                None
             );
 
             // Количество изменившихся нейронов должно совпадать
