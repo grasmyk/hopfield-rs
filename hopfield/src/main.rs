@@ -30,7 +30,7 @@ fn main() {
 
     println!("4. Запуск динамики восстановления (асинхронный режим)...");
     for iter in 1..=20 {
-        let changed = neuron_fix(&mut noisy_state, &weights, seed + iter as u64 + 2000);
+        let changed = neuron_fix(&mut noisy_state, &weights, seed + iter as u64 + 2000, None);
         let overlap = calculate_overlap(&noisy_state, target_pattern);
         let energy = calculate_energy(&noisy_state, &weights);
 
