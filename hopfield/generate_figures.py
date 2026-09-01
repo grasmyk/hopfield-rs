@@ -1,4 +1,7 @@
 import os
+import json
+from pathlib import Path
+
 import matplotlib
 # Отключаем GUI-экран полностью
 matplotlib.use('Agg')
@@ -162,10 +165,93 @@ def generate_fig2():
     print(f"  [OK] Успешно сохранен файл: '{output_fig}'")
 
 
+def generate_fig3():
+    sizes = [512, 1024, 2048, 4096]
+    base_dir = Path("target/criterion/Hopfield_Comparison")
+
+    if not base_dir.exists():
+        print(f"[ПРОПУСК] Директория '{base_dir}' не найдена. Сначала запустите `cargo bench`.")
+        return
+
+    print("--> Генерация Рис. 3 (Графики бенчмарков) из результатов Criterion...")
+
+    n_vals, f64_times, u64_times, speedups = [], [], [], []
+
+    for n in sizes:
+        f64_file = base_dir / f"Baseline_f64/{n}/base/estimates.json"
+        u64_file = base_dir / f"Optimized_u64/{n}/base/estimates.json"
+
+        if f64_file.exists() and u64_file.exists():
+            with open(f64_file, 'r', encoding='utf-8') as f:
+                f64_ns = json.load(f)["mean"]["point_estimate"]
+            with open(u64_file, 'r', encoding='utf-8') as f:
+                u64_ns = json.load(f)["mean"]["point_estimate"]
+
+            f64_ms = f64_ns / 1e6
+            u64_ms = u64_ns / 1e6
+            speedup = f64_ms / u64_ms if u64_ms > 0 else 0.0
+
+            n_vals.append(str(n))
+            f64_times.append(f64_ms)
+            u64_times.append(u64_ms)
+            speedups.append(speedup)
+
+    if not n_vals:
+        print("  [ВНИМАНИЕ] Файлы estimates.json не найдены по указанному пути.")
+        return
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5.5), dpi=300)
+
+    # Левый график: Время выполнения (логарифмическая шкала)
+    x = np.arange(len(n_vals))
+    width = 0.35
+
+    rects1 = ax1.bar(x - width/2, f64_times, width, label='Baseline f64', color='#d9534f', alpha=0.85)
+    rects2 = ax1.bar(x + width/2, u64_times, width, label='BitEngine u64', color='#2b8cbe', alpha=0.85)
+
+    ax1.set_yscale('log')
+    ax1.set_xlabel('Размер сети (N)', fontsize=11)
+    ax1.set_ylabel('Время выполнения (ms, лог. шкала)', fontsize=11)
+    ax1.set_title('Время выполнения 50 сидов (f64 vs u64)', fontsize=12, fontweight='bold')
+    ax1.set_xticks(x)
+    ax1.set_xticklabels(n_vals)
+    ax1.legend(fontsize=10)
+    ax1.grid(True, which="both", linestyle=":", alpha=0.6)
+
+    # Значения над столбцами
+    for bar in rects1:
+        height = bar.get_height()
+        ax1.annotate(f'{height:.2f}ms', xy=(bar.get_x() + bar.get_width() / 2, height),
+                     xytext=(0, 3), textcoords="offset points", ha='center', va='bottom', fontsize=8)
+
+    for bar in rects2:
+        height = bar.get_height()
+        ax1.annotate(f'{height:.2f}ms', xy=(bar.get_x() + bar.get_width() / 2, height),
+                     xytext=(0, 3), textcoords="offset points", ha='center', va='bottom', fontsize=8)
+
+    # Правый график: Коэффициент ускорения (Speedup)
+    ax2.plot(n_vals, speedups, marker='o', linewidth=2.5, markersize=8, color='#2ca02c')
+    for i, txt in enumerate(speedups):
+        ax2.annotate(f'{txt:.1f}x', (n_vals[i], speedups[i]), xytext=(0, 8), 
+                     textcoords='offset points', ha='center', fontweight='bold', fontsize=10)
+
+    ax2.set_xlabel('Размер сети (N)', fontsize=11)
+    ax2.set_ylabel('Ускорение (Baseline / BitEngine)', fontsize=11)
+    ax2.set_title('Коэффициент ускорения (Speedup Factor)', fontsize=12, fontweight='bold')
+    ax2.grid(True, linestyle="--", alpha=0.6)
+
+    plt.tight_layout()
+    output_fig = "fig3_benchmark_results.png"
+    plt.savefig(output_fig, dpi=300)
+    plt.close(fig)
+    print(f"  [OK] Успешно сохранен файл: '{output_fig}'")
+
+
 if __name__ == "__main__":
     print("=" * 50)
     print("  Генерация графиков проекта Hopfield Networks")
     print("=" * 50)
     generate_fig1()
     generate_fig2()
+    generate_fig3()
     print("Готово!")
