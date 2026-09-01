@@ -1,8 +1,8 @@
+use mnist::{Mnist, MnistBuilder};
 use rand::Rng;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
-use mnist::{Mnist, MnistBuilder};
 
 // ---------------------------------------------------------------------
 // Експеримент с мнистом
@@ -11,18 +11,18 @@ use mnist::{Mnist, MnistBuilder};
 pub fn mnist_experiment() {
     use std::fs::File;
     use std::io::Write;
-    
+
     let k_values = vec![2, 5, 10, 20, 50];
     let num_seeds = 10; // Количество запусков на каждое k
 
     // 1. Файл с метриками точности и C_ab
-    let mut csv_file: File = File::create("mnist_results.csv")
-        .expect("Не удалось создать mnist_results.csv");
+    let mut csv_file: File =
+        File::create("mnist_results.csv").expect("Не удалось создать mnist_results.csv");
     writeln!(csv_file, "dataset,k,seed,image_idx,c_ab,overlap,success").unwrap();
 
     // 2. Файл с пикселями картинок
-    let mut samples_file = File::create("mnist_samples.csv")
-        .expect("Не удалось создать mnist_samples.csv");
+    let mut samples_file =
+        File::create("mnist_samples.csv").expect("Не удалось создать mnist_samples.csv");
     writeln!(samples_file, "k,image_idx,stage,pixels").unwrap();
 
     // 3. Создаем маску clamping: верхняя половина заморожена (true), нижняя свободна (false)
@@ -49,10 +49,10 @@ pub fn mnist_experiment() {
                 // Запуск восстановления с CLAMPING
                 for iter in 0..100 {
                     let changed = neuron_fix(
-                        &mut state, 
-                        &weights_mnist, 
-                        seed as u64 + iter as u64 + 500, 
-                        Some(&mask) // <-- Фиксируем верхнюю половину
+                        &mut state,
+                        &weights_mnist,
+                        seed as u64 + iter as u64 + 500,
+                        Some(&mask), // <-- Фиксируем верхнюю половину
                     );
                     if changed == 0 {
                         break;
@@ -67,17 +67,40 @@ pub fn mnist_experiment() {
                     csv_file,
                     "mnist,{},{},{},{:.4},{:.4},{}",
                     k, seed, img_idx, c_ab_mnist, m, success
-                ).unwrap();
+                )
+                .unwrap();
 
                 // Для k = 5 на первом сиде сохраняем все 3 состояния для визуализации
                 if k == 5 && seed_idx == 0 {
                     let orig_str: Vec<String> = pattern.iter().map(|p| p.to_string()).collect();
-                    let corr_str: Vec<String> = corrupted_copy.iter().map(|p| p.to_string()).collect();
+                    let corr_str: Vec<String> =
+                        corrupted_copy.iter().map(|p| p.to_string()).collect();
                     let rest_str: Vec<String> = state.iter().map(|p| p.to_string()).collect();
 
-                    writeln!(samples_file, "{},{},original,\"{}\"", k, img_idx, orig_str.join(" ")).unwrap();
-                    writeln!(samples_file, "{},{},corrupted,\"{}\"", k, img_idx, corr_str.join(" ")).unwrap();
-                    writeln!(samples_file, "{},{},restored,\"{}\"", k, img_idx, rest_str.join(" ")).unwrap();
+                    writeln!(
+                        samples_file,
+                        "{},{},original,\"{}\"",
+                        k,
+                        img_idx,
+                        orig_str.join(" ")
+                    )
+                    .unwrap();
+                    writeln!(
+                        samples_file,
+                        "{},{},corrupted,\"{}\"",
+                        k,
+                        img_idx,
+                        corr_str.join(" ")
+                    )
+                    .unwrap();
+                    writeln!(
+                        samples_file,
+                        "{},{},restored,\"{}\"",
+                        k,
+                        img_idx,
+                        rest_str.join(" ")
+                    )
+                    .unwrap();
                 }
             }
 
@@ -91,10 +114,10 @@ pub fn mnist_experiment() {
 
                 for iter in 0..100 {
                     let changed = neuron_fix(
-                        &mut state, 
-                        &weights_random, 
-                        seed as u64 + iter as u64 + 500, 
-                        Some(&mask) // <-- Также применяем clamping
+                        &mut state,
+                        &weights_random,
+                        seed as u64 + iter as u64 + 500,
+                        Some(&mask), // <-- Также применяем clamping
                     );
                     if changed == 0 {
                         break;
@@ -108,7 +131,8 @@ pub fn mnist_experiment() {
                     csv_file,
                     "random,{},{},{},{:.4},{:.4},{}",
                     k, seed, img_idx, c_ab_random, m, success
-                ).unwrap();
+                )
+                .unwrap();
             }
         }
     }
@@ -133,7 +157,11 @@ pub fn calculate_pairwise_overlap(patterns: &[Vec<f64>]) -> f64 {
 
     for i in 0..k {
         for j in (i + 1)..k {
-            let dot_product: f64 = patterns[i].iter().zip(patterns[j].iter()).map(|(a, b)| a * b).sum();
+            let dot_product: f64 = patterns[i]
+                .iter()
+                .zip(patterns[j].iter())
+                .map(|(a, b)| a * b)
+                .sum();
             total_overlap += dot_product / n;
             pair_count += 1;
         }
@@ -174,7 +202,6 @@ pub fn calculate_initial_overlaps(state: &[u64], patterns: &[Vec<u64>], n: usize
                 popcnt += (w1 ^ w2).count_ones();
             }
             // Формула: q_mu = N - 2 * popcount
-            // Никаких f64 и делений! Абсолютная точность.
             n_i32 - 2 * (popcnt as i32)
         })
         .collect()
@@ -256,7 +283,7 @@ pub fn neuron_fix_bit(
 pub fn calculate_overlap(state: &[f64], pattern: &[f64]) -> f64 {
     let n = state.len() as f64;
     let dot_product: f64 = state.iter().zip(pattern.iter()).map(|(a, b)| a * b).sum();
-    
+
     dot_product / n
 }
 
@@ -283,7 +310,7 @@ pub fn corrupt_lower_half(pattern: &[f64], seed: u64) -> Vec<f64> {
 pub fn capacity_experiment() {
     use std::fs::File;
     use std::io::Write;
-    
+
     let n_values = vec![256, 512, 1024, 2048, 4096];
     let num_seeds = 20;
     let main_seed = rand::thread_rng().gen_range(0..10000);
@@ -357,7 +384,7 @@ pub fn capacity_experiment() {
     println!("Готово! Данные сохранены в файл 'capacity_results.csv'");
 }
 
-// Функция генерирующая случайные 
+// Функция генерирующая случайные
 pub fn generate_states(p: usize, n: usize, seed: u64) -> Vec<Vec<f64>> {
     let mut rng = StdRng::seed_from_u64(seed);
     let mut states_vector = Vec::with_capacity(p);
@@ -410,7 +437,7 @@ pub fn neuron_fix(
 ) -> usize {
     let n = states.len();
     let mut indices: Vec<usize> = (0..n).collect();
-    
+
     // Если передана маска, отсеиваем зажатые (true) нейроны из очереди на обновление
     if let Some(mask) = clamped_mask {
         indices.retain(|&i| !mask[i]);
@@ -530,8 +557,9 @@ pub fn load_mnist_binarized(count: usize) -> Vec<Vec<f64>> {
 pub fn test_fixed_point() {
     use std::fs::File;
     use std::io::Write;
-    
-    let mut file = File::create("test_fixed_point_results.csv").expect("Не удалось создать CSV файл");
+
+    let mut file =
+        File::create("test_fixed_point_results.csv").expect("Не удалось создать CSV файл");
     writeln!(file, "n,seed,state_id").unwrap();
     for iter in 0..50 {
         let seed = iter;
@@ -576,7 +604,7 @@ pub fn test_noise_10() {
 
             for iter in 0..15 {
                 let changed = neuron_fix(&mut noisy_state, &weights, seed + iter + 3000, None);
-                if changed == 0{
+                if changed == 0 {
                     break;
                 }
             }
@@ -633,7 +661,8 @@ pub fn basic_drop_test() {
     use std::fs::File;
     use std::io::Write;
 
-    let mut file = File::create("basic_drop_test_results.csv").expect("Не удалось создать CSV файл");
+    let mut file =
+        File::create("basic_drop_test_results.csv").expect("Не удалось создать CSV файл");
     writeln!(file, "seed,acc_100,acc_200").unwrap();
 
     let n = 1000;
@@ -653,7 +682,8 @@ pub fn basic_drop_test() {
                 let mut noisy_state = apply_noise(target_pattern, 0.05, seed + 2000 + idx as u64);
 
                 for iter in 0..15 {
-                    let changed = neuron_fix(&mut noisy_state, &weights, seed + iter as u64 + 3000, None);
+                    let changed =
+                        neuron_fix(&mut noisy_state, &weights, seed + iter as u64 + 3000, None);
                     if changed == 0 {
                         break;
                     }
@@ -678,13 +708,15 @@ pub fn basic_drop_test() {
         assert!(
             acc_100 >= 0.95,
             "При P=100 средняя точность по 10 образцам должна быть >= 95%, получили: {:.2}% (сид: {})",
-            acc_100 * 100.0, seed
+            acc_100 * 100.0,
+            seed
         );
 
         assert!(
             acc_200 <= 0.85,
             "При P=200 средняя точность по 10 образцам должна упасть <= 85%, получили: {:.2}% (сид: {})",
-            acc_200 * 100.0, seed
+            acc_200 * 100.0,
+            seed
         );
     }
 }
@@ -762,7 +794,8 @@ pub fn sync_vs_async_test() {
     use std::io::Write;
 
     let mut found_oscillation = false;
-    let mut file = File::create("test_async_vs_sync_results.csv").expect("Не удалось создать CSV файл");
+    let mut file =
+        File::create("test_async_vs_sync_results.csv").expect("Не удалось создать CSV файл");
     let _ = writeln!(file, "seed");
     // Ищем случай, где синхронный режим зацикливается
     for seed in 0..1000 {
@@ -798,7 +831,8 @@ pub fn sync_vs_async_test() {
             let mut async_converged = false;
 
             for iter in 0..50 {
-                let changed = neuron_fix(&mut async_state, &weights, seed + iter as u64 + 3000, None);
+                let changed =
+                    neuron_fix(&mut async_state, &weights, seed + iter as u64 + 3000, None);
                 if changed == 0 {
                     async_converged = true;
                     break;
@@ -826,14 +860,15 @@ pub fn sync_vs_async_test() {
 pub fn test_bit_vs_standart_equivalence() {
     use std::fs::File;
     use std::io::Write;
-    
+
     let n = 1024;
     let p = 50;
     let num_runs = 20;
-    let mut file = File::create("test_bit_vs_standart_equivalence.csv").expect("Не удалось создать CSV файл");
+    let mut file =
+        File::create("test_bit_vs_standart_equivalence.csv").expect("Не удалось создать CSV файл");
     let _ = writeln!(file, "seed,iter_number");
     for run in 0..num_runs {
-        let run_seed =  run as u64;
+        let run_seed = run as u64;
 
         // 1. Генерируем паттерны и зашумляем 1-й образ
         let states_f64 = generate_states(p, n, run_seed + 1000);
@@ -860,7 +895,7 @@ pub fn test_bit_vs_standart_equivalence() {
                 &mut m_overlaps,
                 n,
                 iter_seed,
-                None
+                None,
             );
 
             // Количество изменившихся нейронов должно совпадать

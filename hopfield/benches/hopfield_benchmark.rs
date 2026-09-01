@@ -21,7 +21,8 @@ fn bench_hopfield_multi_n(c: &mut Criterion) {
             let weights = weight_matrix_calculate(&states_f64);
             let noisy_f64 = apply_noise(&states_f64[0], 0.05, seed + 2000);
 
-            let packed_patterns: Vec<Vec<u64>> = states_f64.iter().map(|pat| pack_bits(pat)).collect();
+            let packed_patterns: Vec<Vec<u64>> =
+                states_f64.iter().map(|pat| pack_bits(pat)).collect();
             let packed_noisy = pack_bits(&noisy_f64);
 
             f64_test_cases.push((weights, noisy_f64, seed));
