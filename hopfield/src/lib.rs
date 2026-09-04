@@ -1,8 +1,96 @@
+use std::fs::OpenOptions;
+use std::io::Write;
+
 use mnist::{Mnist, MnistBuilder};
 use rand::Rng;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
+
+
+// ---------------------------------------------------------------------
+// Експеримент с рекордными замерами
+// ---------------------------------------------------------------------
+
+pub fn record_capacity_experiment() {
+    println!("=== Динамический расчет емкости (авто-остановка) ===");
+
+    let experiments = [
+        (256, 50),
+        (1024, 50),
+        (4096, 30),
+        (16384, 30),
+        (65536, 12),
+    ];
+
+    let mut file = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open("capacity_results_h4.csv")
+        .expect("Не удалось открыть capacity_results_h4.csv");
+
+    // Записываем корректный 5-колоночный заголовок
+    writeln!(file, "n,seed,final_overlap,alpha,success_rate").unwrap();
+
+    for (n, num_seeds) in experiments {
+        println!("\n--> Расчет N = {}, сидов = {}", n, num_seeds);
+
+        let mut alpha = 0.1300;
+        let alpha_step = 0.0025;
+
+        loop {
+            let p = (alpha * n as f64).round() as usize;
+            let mut overlaps = Vec::with_capacity(num_seeds);
+
+            for seed_idx in 0..num_seeds {
+                let seed = seed_idx as u64;
+
+                let states_f64 = generate_states(p, n, seed + 1000);
+                let packed_patterns: Vec<Vec<u64>> = states_f64.iter().map(|pat| pack_bits(pat)).collect();
+
+                let noisy_f64 = apply_noise(&states_f64[0], 0.05, seed + 2000);
+                let mut state = pack_bits(&noisy_f64);
+
+                let mut q_overlaps = calculate_initial_overlaps(&state, &packed_patterns, n);
+
+                neuron_fix_bit(
+                    &mut state,
+                    &packed_patterns,
+                    &mut q_overlaps,
+                    n,
+                    seed,
+                    None,
+                );
+
+                let final_state_f64 = unpack_bits(&state, n);
+                let final_overlap = calculate_overlap(&final_state_f64, &states_f64[0]);
+                
+                overlaps.push(final_overlap);
+            }
+
+            // Считаем общий успех для текущей alpha по всем сидам
+            let success_count = overlaps.iter().filter(|&&m| m >= 0.95).count();
+            let success_rate = success_count as f64 / num_seeds as f64;
+
+            // Записываем результат каждого сида с уже посчитанным итоговым success_rate
+            for (seed_idx, &overlap) in overlaps.iter().enumerate() {
+                writeln!(file, "{},{},{:.6},{:.4},{:.4}", n, seed_idx, overlap, alpha, success_rate).unwrap();
+            }
+            file.flush().unwrap();
+
+            println!("  N = {:5} | α = {:.4} (P = {:5}) | Доля успеха: {:.1}%", n, alpha, p, success_rate * 100.0);
+
+            // Условие остановки: завершаем прогон для текущего N, когда успех упал ниже 10%
+            if success_rate < 0.50 {
+                println!("  [STOP] Доля успеха упала ниже 50%. Переход к следующему N.");
+                break;
+            }
+
+            alpha += alpha_step;
+        }
+    }
+}
 
 // ---------------------------------------------------------------------
 // Експеримент с мнистом

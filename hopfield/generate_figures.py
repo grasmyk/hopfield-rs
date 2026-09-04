@@ -165,18 +165,25 @@ def generate_fig2():
     print(f"  [OK] Успешно сохранен файл: '{output_fig}'")
 
 
-def generate_fig3():
+def generate_benchmark_table():
     sizes = [512, 1024, 2048, 4096]
     base_dir = Path("target/criterion/Hopfield_Comparison")
 
     if not base_dir.exists():
-        print(f"[ПРОПУСК] Директория '{base_dir}' не найдена. Сначала запустите `cargo bench`.")
-        return
+        # Резервный поиск по всем подпапкам в target/criterion
+        criterion_dir = Path("target/criterion")
+        if criterion_dir.exists():
+            matches = list(criterion_dir.glob("**/estimates.json"))
+            if not matches:
+                print(f"[ПРОПУСК] Бенчмарки Criterion не найдены. Сначала запустите `cargo bench`.")
+                return
+        else:
+            print(f"[ПРОПУСК] Директория '{base_dir}' не найдена. Сначала запустите `cargo bench`.")
+            return
 
-    print("--> Генерация Рис. 3 (Графики бенчмарков) из результатов Criterion...")
+    print("--> Генерация таблицы бенчмарков из результатов Criterion...")
 
-    n_vals, f64_times, u64_times, speedups = [], [], [], []
-
+    rows = []
     for n in sizes:
         f64_file = base_dir / f"Baseline_f64/{n}/base/estimates.json"
         u64_file = base_dir / f"Optimized_u64/{n}/base/estimates.json"
@@ -191,67 +198,156 @@ def generate_fig3():
             u64_ms = u64_ns / 1e6
             speedup = f64_ms / u64_ms if u64_ms > 0 else 0.0
 
-            n_vals.append(str(n))
-            f64_times.append(f64_ms)
-            u64_times.append(u64_ms)
-            speedups.append(speedup)
+            rows.append({
+                "n": n,
+                "f64_ms": f64_ms,
+                "u64_ms": u64_ms,
+                "speedup": speedup
+            })
 
-    if not n_vals:
+    if not rows:
         print("  [ВНИМАНИЕ] Файлы estimates.json не найдены по указанному пути.")
         return
 
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5.5), dpi=300)
+    table_lines = [
+        "\n### Сравнение производительности (50 seeds)\n",
+        "| N | Baseline f64 (ms) | BitEngine u64 (ms) | Ускорение |",
+        "|---|---|---|---|"
+    ]
 
-    # Левый график: Время выполнения (логарифмическая шкала)
-    x = np.arange(len(n_vals))
-    width = 0.35
+    for r in rows:
+        table_lines.append(f"| {r['n']} | {r['f64_ms']:.2f} ms | {r['u64_ms']:.2f} ms | **{r['speedup']:.1f}x** |")
 
-    rects1 = ax1.bar(x - width/2, f64_times, width, label='Baseline f64', color='#d9534f', alpha=0.85)
-    rects2 = ax1.bar(x + width/2, u64_times, width, label='BitEngine u64', color='#2b8cbe', alpha=0.85)
+    table_md = "\n".join(table_lines) + "\n"
+    print(table_md)
 
-    ax1.set_yscale('log')
-    ax1.set_xlabel('Размер сети (N)', fontsize=11)
-    ax1.set_ylabel('Время выполнения (ms, лог. шкала)', fontsize=11)
-    ax1.set_title('Время выполнения 50 сидов (f64 vs u64)', fontsize=12, fontweight='bold')
-    ax1.set_xticks(x)
-    ax1.set_xticklabels(n_vals)
-    ax1.legend(fontsize=10)
-    ax1.grid(True, which="both", linestyle=":", alpha=0.6)
+    output_file = "benchmark_table.md"
+    with open(output_file, "w", encoding="utf-8") as f:
+        f.write(table_md)
 
-    # Значения над столбцами
-    for bar in rects1:
-        height = bar.get_height()
-        ax1.annotate(f'{height:.2f}ms', xy=(bar.get_x() + bar.get_width() / 2, height),
-                     xytext=(0, 3), textcoords="offset points", ha='center', va='bottom', fontsize=8)
-
-    for bar in rects2:
-        height = bar.get_height()
-        ax1.annotate(f'{height:.2f}ms', xy=(bar.get_x() + bar.get_width() / 2, height),
-                     xytext=(0, 3), textcoords="offset points", ha='center', va='bottom', fontsize=8)
-
-    # Правый график: Коэффициент ускорения (Speedup)
-    ax2.plot(n_vals, speedups, marker='o', linewidth=2.5, markersize=8, color='#2ca02c')
-    for i, txt in enumerate(speedups):
-        ax2.annotate(f'{txt:.1f}x', (n_vals[i], speedups[i]), xytext=(0, 8), 
-                     textcoords='offset points', ha='center', fontweight='bold', fontsize=10)
-
-    ax2.set_xlabel('Размер сети (N)', fontsize=11)
-    ax2.set_ylabel('Ускорение (Baseline / BitEngine)', fontsize=11)
-    ax2.set_title('Коэффициент ускорения (Speedup Factor)', fontsize=12, fontweight='bold')
-    ax2.grid(True, linestyle="--", alpha=0.6)
-
-    plt.tight_layout()
-    output_fig = "fig3_benchmark_results.png"
-    plt.savefig(output_fig, dpi=300)
-    plt.close(fig)
-    print(f"  [OK] Успешно сохранен файл: '{output_fig}'")
+    print(f"  [OK] Успешно сохранена таблица: '{output_file}'")
 
 
 if __name__ == "__main__":
     print("=" * 50)
-    print("  Генерация графиков проекта Hopfield Networks")
+    print("  Генерация графиков и отчетов проекта Hopfield Networks")
     print("=" * 50)
     generate_fig1()
     generate_fig2()
-    generate_fig3()
+    generate_benchmark_table()
     print("Готово!")
+
+def generate_fig3_h4():
+    csv_filename = "capacity_results_h4.csv"
+
+    if not os.path.exists(csv_filename):
+        print(f"[ОШИБКА] Файл '{csv_filename}' не найден.")
+        return
+
+    print(f"--> [H4] Чтение и обработка посидовых данных из '{csv_filename}'...")
+    
+    # Чтение CSV (принудительно задаем имена колонок на случай расхождения с заголовком)
+    df = pd.read_csv(
+        csv_filename, 
+        names=["n", "seed", "final_overlap", "alpha", "success_rate"], 
+        header=0
+    )
+
+    # Приводим типы данных
+    df['n'] = pd.to_numeric(df['n'], errors='coerce').dropna().astype(int)
+    df['alpha'] = pd.to_numeric(df['alpha'], errors='coerce')
+    df['final_overlap'] = pd.to_numeric(df['final_overlap'], errors='coerce')
+
+    # Фиксируем успешность по порогу узнаваемости (m >= 0.95)
+    df['success'] = (df['final_overlap'] >= 0.95).astype(float)
+
+    fig, ax = plt.subplots(figsize=(11, 6.5), dpi=300)
+    n_values = sorted(df['n'].unique())
+    colors = plt.cm.plasma(np.linspace(0.1, 0.9, len(n_values)))
+
+    table_metrics = []
+
+    for idx, n in enumerate(n_values):
+        sub = df[df['n'] == n]
+
+        # Группировка по alpha: вычисляем среднюю долю успеха по всем сидам
+        stats = sub.groupby('alpha')['success'].agg(
+            mean='mean',
+            std='std',
+            count='count'
+        ).reset_index().sort_values('alpha')
+
+        stats['sem'] = (stats['std'] / np.sqrt(stats['count'])).fillna(0)
+
+        # Расчет α_½ и α_90 методом линейной интерполяции
+        def interp(y_target):
+            for i in range(len(stats) - 1):
+                y1, y2 = stats['mean'].iloc[i], stats['mean'].iloc[i + 1]
+                a1, a2 = stats['alpha'].iloc[i], stats['alpha'].iloc[i + 1]
+                if (y1 >= y_target >= y2) or (y1 <= y_target <= y2):
+                    return a1 if y1 == y2 else a1 + (y_target - y1) * (a2 - a1) / (y2 - y1)
+            return np.nan
+
+        a_half = interp(0.5)
+        a_90 = interp(0.9)
+        
+        # Расчет ширины обвала от 90% до 50%
+        width = abs(a_half - a_90) if not (np.isnan(a_half) or np.isnan(a_90)) else np.nan
+
+        table_metrics.append({'N': n, 'alpha_half': a_half, 'width': width})
+
+        ax.plot(
+            stats['alpha'], 
+            stats['mean'], 
+            marker='o', 
+            linewidth=2.8 if n >= 16384 else 1.8, 
+            markersize=7 if n >= 16384 else 4,
+            color=colors[idx],
+            label=f'N = {n}'
+        )
+
+        ax.fill_between(
+            stats['alpha'],
+            np.clip(stats['mean'] - stats['sem'], 0, 1),
+            np.clip(stats['mean'] + stats['sem'], 0, 1),
+            color=colors[idx],
+            alpha=0.12
+        )
+
+    ax.axvline(x=0.138, color='#d9534f', linestyle='--', linewidth=1.8, label=r'Теория $\alpha_c \approx 0.138$')
+
+    ax.set_title("Сводные кривые ёмкости (от N = 256 до N = 65 536)", fontsize=13, fontweight='bold', pad=15)
+    ax.set_xlabel("Нагрузка α = P / N", fontsize=11)
+    ax.set_ylabel("Доля успешных восстановлений (m ≥ 0.95)", fontsize=11)
+    
+    ax.set_xlim(0.128, 0.21)
+    ax.set_ylim(-0.03, 1.05)
+    ax.grid(True, linestyle=':', alpha=0.6)
+    ax.legend(title="Размер сети N", fontsize=9, title_fontsize=10, loc='lower left', frameon=True)
+
+    output_fig = "fig3_capacity_curves_record.png"
+    plt.savefig(output_fig, dpi=300)
+    plt.close(fig)
+    print(f"  [OK] График сохранен в '{output_fig}'")
+
+    # Генерация Markdown-таблицы C9
+    table_lines = [
+        "### Таблица свойств фазового перехода (Утверждение C9)\n",
+        "| N | α_½ (50% успеха) | Ширина обвала Δα (90%→50%) |",
+        "|---|---|---|"
+    ]
+    for m in table_metrics:
+        ah_str = f"{m['alpha_half']:.4f}" if not np.isnan(m['alpha_half']) else "N/A"
+        w_str = f"{m['width']:.4f}" if not np.isnan(m['width']) else "N/A"
+        table_lines.append(f"| {m['N']} | {ah_str} | {w_str} |")
+
+    table_md = "\n".join(table_lines) + "\n"
+    print("\n" + table_md)
+
+    with open("summary_table_record.md", "w", encoding="utf-8") as f:
+        f.write(table_md)
+    print("  [OK] Таблица сохранена в 'summary_table_record.md'")
+
+
+if __name__ == "__main__":
+    generate_fig3_h4()
